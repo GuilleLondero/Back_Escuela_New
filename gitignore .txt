@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Conda environment folders (por si usás entornos locales)
+env/
+.venv/
+apiEscu/
+
+# VSCode settings (si usás VSCode)
+.vscode/
+
+# PyCharm settings (opcional)
+.idea/
+
+# Logs y archivos temporales
+*.log
+*.tmp
+*.swp
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de pruebas locales
+.env
+*.sqlite3
+
+# Archivos de dependencia
+poetry.lock
+Pipfile.lock
