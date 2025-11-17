@@ -1,8 +1,11 @@
 from configs.db import engine, Base
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import sessionmaker, relationship
-from pydantic import BaseModel
 import datetime
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
+
+
 
 # region Modelos SQLAlchemy
 class User(Base):
@@ -40,7 +43,7 @@ class Career(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(50))
     active = Column(Boolean, default=True)  # eliminación lógica
-    payments = relationship("Payment", back_populates="career")  # relación inversa
+    #payments = relationship("Payment", back_populates="career")  # relación inversa
 
     def __init__(self, name):
         self.name= name
@@ -57,7 +60,7 @@ class Payment(Base):
     created_at = Column(DateTime, default=datetime.datetime.now())
 
     user = relationship("User", uselist=False, back_populates="payments")
-    career = relationship("Career", uselist=False, back_populates="payments")
+    career = relationship("Career", uselist=False) #back_populates="payments")
 
     def __init__(self, a, b, c, d):
         self.id_career = a
@@ -115,6 +118,7 @@ class InputUserDetail(BaseModel):
 class InputCareer(BaseModel):
     name: str
     active: bool = True 
+
 class InputPayment(BaseModel):
     id_career: int
     id_user: int
@@ -126,12 +130,26 @@ class InputUserAddCareer(BaseModel):
     id_user: int
     id_career: int
 
-
-
 class InputNotification(BaseModel):
     message: str
 
-    
+class InputPaginatedRequest(BaseModel):
+    limit: int = 20
+    last_seen_id: Optional[int] = None
+    search: Optional[str] = ""
+
+class InputPaginatedRequestFilter(BaseModel):
+    limit: int = Field(
+        20, gt=0, le=100, description="Cantidad máxima de registros a retornar"
+    )
+    last_seen_id: Optional[int] = Field(
+        None, description="ID del último registro visto (cursor) para keyset pagination"
+    )
+    filters: Optional[Dict[str, Any]] = Field(
+        None, description="Filtros opcionales de búsqueda"
+    )
+
+
 # endregion
 
 # region configuraciones 
