@@ -1,16 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
-from models.modelo import Payment, InputPayment, User, session
+from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
+from models.modelo import Payment, InputPayment, User, AsyncSessionLocal, session
 from datetime import datetime
+
+payment = APIRouter()
 
 meses = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
     5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
     9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
-
-payment = APIRouter()
 
 
 @payment.post("/payment/add")
@@ -19,12 +20,7 @@ def add_payment(pay: InputPayment):
         # Convertir string a datetime.date
         fecha = datetime.strptime(pay.affected_month, "%Y-%m").date()
 
-        newPayment = Payment(
-            pay.id_career,
-            pay.id_user,
-            pay.amount,
-            fecha  
-        )
+        newPayment = Payment(pay.id_career, pay.id_user, pay.amount, fecha)
         session.add(newPayment)
         session.commit()
         return {"message": "Pago registrado con éxito"}
@@ -37,10 +33,12 @@ def add_payment(pay: InputPayment):
 @payment.get("/payment/user/{_username}")
 def payment_user(_username: str):
     try:
+        # Buscar el usuario por username
         user = session.query(User).filter(User.username == _username).first()
         if not user:
             return JSONResponse(status_code=404, content={"message": "Usuario no encontrado"})
 
+        # Buscar pagos activos del usuario
         payments = (
             session.query(Payment)
             .filter(Payment.id_user == user.id, Payment.active == True)
@@ -48,11 +46,12 @@ def payment_user(_username: str):
             .all()
         )
 
+        # Construir la respuesta
         result = [
             {
                 "id": pay.id,
                 "amount": pay.amount,
-                "fecha_pago": pay.created_at,
+                "fecha_pago": pay.created_at.isoformat(),
                 "usuario": f"{user.userdetail.first_name} {user.userdetail.last_name}",
                 "carrera": pay.career.name,
                 "mes_afectado": f"{meses[pay.affected_month.month]} de {pay.affected_month.year}",
@@ -74,13 +73,11 @@ def update_payment(id: int, input: InputPayment):
         if not pay:
             return JSONResponse(status_code=404, content={"message": "Pago no encontrado"})
 
-        # Actualizar campos básicos
         pay.id_user = input.id_user
         pay.id_career = input.id_career
         pay.amount = input.amount
         pay.active = input.active
-        
-        # Convertir affected_month de string a datetime si es necesario
+
         if isinstance(input.affected_month, str):
             pay.affected_month = datetime.strptime(input.affected_month, "%Y-%m").date()
         else:
@@ -120,7 +117,7 @@ def get_active_payments():
         pagos = (
             session.query(Payment)
             .filter(Payment.active == True)
-            .order_by(Payment.created_at.desc())  # 👈 IMPORTANTE
+            .order_by(Payment.created_at.desc())
             .all()
         )
         result = [
@@ -138,4 +135,71 @@ def get_active_payments():
     except Exception as e:
         session.rollback()
         print("Error al traer pagos activos:", e)
+        return JSONResponse(status_code=500, content={"message": "Error interno"})
+
+
+
+# NUEVO ENDPOINT: PAGINACIÓN ASINCRÓNICA
+
+@payment.get("/payments/paginated")
+async def get_paginated_payments(
+    limit: int = Query(10, ge=1, le=100),
+    last_seen_id: int | None = Query(None),
+    id_user: int | None = Query(None),
+    id_career: int | None = Query(None),
+    active: bool = Query(True)
+):
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(Payment)
+                .options(joinedload(Payment.user).joinedload(User.userdetail), joinedload(Payment.career))
+                .order_by(Payment.id)
+                .filter(Payment.active == active)
+            )
+
+            if last_seen_id:
+                stmt = stmt.filter(Payment.id > last_seen_id)
+            if id_user:
+                stmt = stmt.filter(Payment.id_user == id_user)
+            if id_career:
+                stmt = stmt.filter(Payment.id_career == id_career)
+
+            # Conteo total
+            count_stmt = select(func.count(Payment.id)).filter(Payment.active == active)
+            if id_user:
+                count_stmt = count_stmt.filter(Payment.id_user == id_user)
+            if id_career:
+                count_stmt = count_stmt.filter(Payment.id_career == id_career)
+
+            total_count = (await session.execute(count_stmt)).scalar()
+
+            result = await session.execute(stmt.limit(limit))
+            payments = result.scalars().all()
+
+            items = [
+                {
+                    "id": p.id,
+                    "monto": p.amount,
+                    "fecha": p.created_at.isoformat(),
+                    "mes_afectado": f"{meses[p.affected_month.month]} de {p.affected_month.year}",
+                    "alumno": f"{p.user.userdetail.first_name} {p.user.userdetail.last_name}",
+                    "carrera": p.career.name
+                }
+                for p in payments
+            ]
+
+            next_cursor = items[-1]["id"] if len(items) == limit else None
+
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "items": items,
+                    "next_cursor": next_cursor,
+                    "total_count": total_count,
+                    "limit": limit
+                }
+            )
+    except Exception as e:
+        print("Error en paginación de pagos:", e)
         return JSONResponse(status_code=500, content={"message": "Error interno"})

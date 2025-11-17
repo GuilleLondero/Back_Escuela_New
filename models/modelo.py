@@ -1,4 +1,4 @@
-from configs.db import engine, Base
+from configs.db import engine, Base, AsyncSessionLocal
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
